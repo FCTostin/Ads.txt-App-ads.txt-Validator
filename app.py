@@ -10,7 +10,6 @@ import os
 # 1. НАСТРОЙКИ СТРАНИЦЫ И СТИЛИ (CSS)
 # ==========================================
 
-# Путь к иконке
 icon_path = "icons/icon.png"
 page_icon = icon_path if os.path.exists(icon_path) else None
 
@@ -20,12 +19,13 @@ st.set_page_config(
     page_icon=page_icon
 )
 
-# ПРИНУДИТЕЛЬНЫЙ ДИЗАЙН: Только ЧБ + #21aeb3
+# ПРИНУДИТЕЛЬНЫЙ ДИЗАЙН:
+# Исправлено: добавлены жесткие стили для Radio Button, чтобы убрать красный цвет
 st.markdown("""
     <style>
-    /* 1. Глобальный фон и текст */
+    /* 1. Глобальный фон */
     .stApp {
-        background-color: #1e1e1e; /* Темно-серый фон */
+        background-color: #1e1e1e;
         color: #e0e0e0;
     }
     
@@ -54,20 +54,16 @@ st.markdown("""
         transition: 0.3s;
     }
     div.stButton > button:hover {
-        background-color: #1a8a8e !important; /* Чуть темнее при наведении */
+        background-color: #1a8a8e !important;
         border: 1px solid #ffffff !important;
     }
-    div.stButton > button:active {
-        background-color: #21aeb3 !important;
-    }
-
-    /* 5. Убираем красный цвет из стандартных алертов (Errors/Warnings) */
+    
+    /* 5. Убираем красный из алертов */
     div[data-baseweb="notification"] {
         background-color: #2d2d2d !important;
-        border: 1px solid #21aeb3 !important; /* Вместо красной рамки - наша */
+        border: 1px solid #21aeb3 !important;
         color: #ffffff !important;
     }
-    /* Иконки внутри алертов */
     div[data-baseweb="notification"] svg {
         fill: #21aeb3 !important;
     }
@@ -77,13 +73,24 @@ st.markdown("""
         background-color: #2d2d2d;
     }
     
-    /* 7. Радио-кнопки и чекбоксы */
-    .stRadio label, .stCheckbox label {
+    /* =============================================
+       7. ИСПРАВЛЕНИЕ РАДИО-КНОПОК (Убираем красный)
+       ============================================= */
+    
+    /* Цвет текста радио-кнопок */
+    .stRadio label {
         color: #e0e0e0 !important;
     }
-    /* Акцент при выборе радио-кнопки */
-    div[role="radiogroup"] > div[aria-checked="true"] {
+    
+    /* Внешний круг и внутренний круг (выбранный) */
+    div[role="radiogroup"] div[aria-checked="true"] div:first-child {
         background-color: #21aeb3 !important;
+        border-color: #21aeb3 !important;
+    }
+    
+    /* Убираем стандартную подсветку Streamlit */
+    div[role="radiogroup"] > div {
+        color: #e0e0e0 !important;
     }
 
     /* 8. Прогресс-бар */
@@ -123,15 +130,11 @@ def fetch_file_content(domain, filename):
 
     for url in urls:
         try:
-            # Надежная задержка
             time.sleep(random.uniform(0.5, 1.5))
-            
             response = session.get(url, timeout=15, allow_redirects=True)
             if response.status_code == 200:
                 return response.text, "OK", False
-            
             last_error = f"HTTP {response.status_code}"
-            
         except requests.exceptions.SSLError:
             try:
                 time.sleep(1)
@@ -149,12 +152,10 @@ def parse_ads_file(content):
     parsed_lines = []
     if not content:
         return parsed_lines
-
     for line in content.splitlines():
         clean_line = line.split('#')[0].strip()
         if not clean_line:
             continue
-        
         parts = [p.strip() for p in clean_line.split(',')]
         if len(parts) >= 2:
             parsed_lines.append({
@@ -168,7 +169,6 @@ def parse_reference_line(line):
     parts = [p.strip() for p in line.split(',')]
     if len(parts) < 2:
         return None
-    
     return {
         'domain': parts[0].lower(),
         'id': parts[1].lower(),
@@ -178,7 +178,6 @@ def parse_reference_line(line):
 
 def validate_domain(target_domain, filename, references):
     content, status_msg, is_error = fetch_file_content(target_domain, filename)
-    
     results = []
     
     if is_error:
@@ -208,7 +207,6 @@ def validate_domain(target_domain, filename, references):
                     match_status = "Valid"
                     details = "Matched by Domain + ID"
                     break
-                
                 if record['type'] == ref_type:
                     match_status = "Valid"
                     details = "Full match"
@@ -216,7 +214,6 @@ def validate_domain(target_domain, filename, references):
                 else:
                     match_status = "Partially matched"
                     details = f"Type mismatch: found {record['type']}, expected {ref_type}"
-                    # Не прерываем, ищем дальше
         
         results.append({
             "URL": target_domain,
@@ -243,7 +240,6 @@ with col_settings:
 st.markdown("---")
 
 st.subheader("Input Data")
-
 col1, col2 = st.columns(2)
 
 with col1:
@@ -272,10 +268,9 @@ start_btn = st.button("Start Validation")
 
 if start_btn:
     if not target_input or not ref_input:
-        st.error("Please fill both windows.")
+        st.warning("Please fill both windows.")
     else:
         targets = [t.strip() for t in target_input.splitlines() if t.strip()]
-        
         references = []
         raw_refs = [r.strip() for r in ref_input.splitlines() if r.strip()]
         for r in raw_refs:
@@ -284,14 +279,12 @@ if start_btn:
                 references.append(parsed)
 
         if not references:
-            st.warning("No valid reference lines found.") # Теперь это будет серым, не желтым/красным
+            st.warning("No valid reference lines found.")
             st.stop()
 
         progress_bar = st.progress(0)
         status_text = st.empty()
         all_results = []
-        
-        # 5 потоков для надежности
         MAX_WORKERS = 5 
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -326,19 +319,14 @@ if start_btn:
         cols_order = ["URL", "File", "Result", "Details", "Reference"]
         df = df[cols_order]
 
-        # Логика цветов таблицы (Убрали красный!)
         def color_status(val):
             if val == "Valid":
-                # Успех: Наш фирменный цвет
                 return 'background-color: #21aeb3; color: white' 
             elif val == "Partially matched":
-                # Частично: Черный фон, цветной текст
                 return 'background-color: #000000; color: #21aeb3; font-weight: bold'
             elif val == "Not found":
-                # Не найдено: Темно-серый (нейтральный)
                 return 'background-color: #383838; color: #aaaaaa'
             elif val == "Error":
-                # Ошибка сети: Тоже серый, но другой оттенок
                 return 'background-color: #2d2d2d; color: #888888'
             return ''
 
