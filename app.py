@@ -67,7 +67,7 @@ st.markdown("""
         background-color: #2d2d2d;
     }
     
-    .stRadio label {
+    .stRadio label, .stMultiSelect label {
         color: #e0e0e0 !important;
     }
     div[role="radiogroup"] div[aria-checked="true"] div:first-child {
@@ -99,6 +99,10 @@ st.markdown("""
     
     [data-testid="stImage"] {
         margin-top: 15px;
+    }
+    
+    .stMultiSelect span {
+        color: #e0e0e0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -260,12 +264,39 @@ with col_settings:
     )
     
     st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
+
+    layout_mode = st.radio(
+        "Result Layout",
+        ("Standard (Vertical)", "Horizontal (Aggregated)"),
+        index=0
+    )
+    
+    st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
     
     view_mode = st.radio(
         "Output View",
         ("Show All Results", "Errors / Warnings Only"),
         index=1
     )
+    
+    error_filters = []
+    if view_mode == "Errors / Warnings Only":
+        err_options = [
+            "Type mismatch: found RESELLER, expected DIRECT",
+            "Not Found (No Domain+ID)",
+            "Other Partial Matches",
+            "Connection / System Errors"
+        ]
+        
+        error_filters = st.multiselect(
+            "Filter specific errors:",
+            options=err_options,
+            default=[
+                "Not Found (No Domain+ID)",
+                "Other Partial Matches",
+                "Connection / System Errors"
+            ]
+        )
 
 st.markdown('<div class="compact-hr" style="margin: 15px 0 !important;"></div>', unsafe_allow_html=True)
 
@@ -351,32 +382,68 @@ if st.session_state.results_df is not None:
     
     final_df = st.session_state.results_df.copy()
     
+    def classify_error(row):
+        r = row['Result']
+        d = row['Details']
+        
+        if r == "Valid":
+            return "Valid"
+        
+        if "found RESELLER, expected DIRECT" in d:
+            return "Type mismatch: found RESELLER, expected DIRECT"
+            
+        if "No matching Domain+ID pair" in d:
+            return "Not Found (No Domain+ID)"
+            
+        if r == "Partially matched":
+            return "Other Partial Matches"
+            
+        if r == "Error" or "System Error" in r or "HTTP" in d:
+            return "Connection / System Errors"
+            
+        return "Other"
+
     if view_mode == "Errors / Warnings Only":
-        final_df = final_df[final_df['Result'] != 'Valid']
+        final_df['ErrorCategory'] = final_df.apply(classify_error, axis=1)
+        final_df = final_df[final_df['ErrorCategory'].isin(error_filters)]
+        final_df = final_df.drop(columns=['ErrorCategory'])
 
     if final_df.empty and view_mode == "Errors / Warnings Only" and st.session_state.all_results_raw:
-            st.success("🎉 Great job! All checked records are VALID. No errors found.")
+        st.success("No errors found based on current filters.")
     elif final_df.empty and not st.session_state.all_results_raw:
-            st.info("No results to display.")
+        st.info("No results to display.")
     else:
-        def color_status(val):
-            if val == "Valid":
-                return 'background-color: #21aeb3; color: white' 
-            elif val == "Partially matched":
-                return 'background-color: #000000; color: #21aeb3; font-weight: bold'
-            elif val == "Not found":
-                return 'background-color: #383838; color: #aaaaaa'
-            elif val == "Error":
-                return 'background-color: #2d2d2d; color: #888888'
-            return ''
+        if layout_mode == "Horizontal (Aggregated)":
+            def aggregate_rows(x):
+                lines = []
+                for _, row in x.iterrows():
+                    lines.append(f"{row['Details']} - {row['Reference']}")
+                return " || ".join(lines)
 
-        st.dataframe(
-            final_df.style.map(color_status, subset=['Result']),
-            use_container_width=True,
-            height=600
-        )
-        
-        csv = final_df.to_csv(index=False).encode('utf-8-sig')
+            final_df = final_df.groupby(['URL', 'File'])[['Details', 'Reference']].apply(aggregate_rows).reset_index(name='Aggregated Details')
+            st.dataframe(final_df, use_container_width=True, height=600)
+            
+            csv = final_df.to_csv(index=False).encode('utf-8-sig')
+            
+        else:
+            def color_status(val):
+                if val == "Valid":
+                    return 'background-color: #21aeb3; color: white' 
+                elif val == "Partially matched":
+                    return 'background-color: #000000; color: #21aeb3; font-weight: bold'
+                elif val == "Not found":
+                    return 'background-color: #383838; color: #aaaaaa'
+                elif val == "Error":
+                    return 'background-color: #2d2d2d; color: #888888'
+                return ''
+
+            st.dataframe(
+                final_df.style.map(color_status, subset=['Result']),
+                use_container_width=True,
+                height=600
+            )
+            csv = final_df.to_csv(index=False).encode('utf-8-sig')
+
         st.download_button(
             label=f"Download CSV ({view_mode})",
             data=csv,
