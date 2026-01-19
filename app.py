@@ -256,19 +256,12 @@ def validate_domain(target_domain, filename, references):
     return results
 
 st.subheader("Settings")
-col_settings, col_dummy = st.columns([1, 4])
-with col_settings:
+set_col1, set_col2 = st.columns(2)
+
+with set_col1:
     file_type = st.radio(
         "File Type",
         ("app-ads.txt", "ads.txt")
-    )
-    
-    st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
-
-    layout_mode = st.radio(
-        "Result Layout",
-        ("Standard (Vertical)", "Horizontal (Aggregated)"),
-        index=0
     )
     
     st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
@@ -278,9 +271,18 @@ with col_settings:
         ("Show All Results", "Errors / Warnings Only"),
         index=1
     )
+
+with set_col2:
+    layout_mode = st.radio(
+        "Result Layout",
+        ("Standard (Vertical)", "Horizontal (Aggregated)"),
+        index=0
+    )
     
     error_filters = []
     if view_mode == "Errors / Warnings Only":
+        st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
+        
         err_options = [
             "Type mismatch: found RESELLER, expected DIRECT",
             "Not Found (No Domain+ID)",
