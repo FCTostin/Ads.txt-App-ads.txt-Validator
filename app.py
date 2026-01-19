@@ -120,6 +120,10 @@ if 'results_df' not in st.session_state:
     st.session_state.results_df = None
 if 'all_results_raw' not in st.session_state:
     st.session_state.all_results_raw = None
+if 'processed_refs' not in st.session_state:
+    st.session_state.processed_refs = []
+if 'target_order' not in st.session_state:
+    st.session_state.target_order = []
 
 def get_session():
     s = requests.Session()
@@ -330,12 +334,16 @@ if start_btn:
         st.warning("Please fill both windows.")
     else:
         targets = [t.strip() for t in target_input.splitlines() if t.strip()]
+        st.session_state.target_order = targets
+        
         references = []
         raw_refs = [r.strip() for r in ref_input.splitlines() if r.strip()]
         for r in raw_refs:
             parsed = parse_reference_line(r)
             if parsed:
                 references.append(parsed)
+        
+        st.session_state.processed_refs = references
 
         if not references:
             st.warning("No valid reference lines found.")
@@ -371,18 +379,18 @@ if start_btn:
         progress_bar.empty()
         status_text.empty()
         
-        df = pd.DataFrame(all_results)
-        cols_order = ["URL", "File", "Result", "Details", "Reference"]
-        df = df[cols_order]
-        
-        st.session_state.results_df = df
         st.session_state.all_results_raw = all_results
 
-if st.session_state.results_df is not None:
+if st.session_state.all_results_raw is not None:
     st.markdown('<div class="compact-hr"></div>', unsafe_allow_html=True)
     st.subheader("Results")
     
-    final_df = st.session_state.results_df.copy()
+    raw_data = st.session_state.all_results_raw
+    final_df = pd.DataFrame(raw_data)
+    
+    target_order_map = {url: i for i, url in enumerate(st.session_state.target_order)}
+    final_df['SortIndex'] = final_df['URL'].map(target_order_map)
+    final_df = final_df.sort_values('SortIndex').drop(columns=['SortIndex'])
     
     def classify_error(row):
         r = row['Result']
@@ -390,19 +398,14 @@ if st.session_state.results_df is not None:
         
         if r == "Valid":
             return "Valid"
-        
         if "found RESELLER, expected DIRECT" in d:
             return "Type mismatch: found RESELLER, expected DIRECT"
-            
         if "No matching Domain+ID pair" in d:
             return "Not Found (No Domain+ID)"
-            
         if r == "Partially matched":
             return "Other Partial Matches"
-            
         if r == "Error" or "System Error" in r or "HTTP" in d:
             return "Connection / System Errors"
-            
         return "Other"
 
     if view_mode == "Errors / Warnings Only":
@@ -410,41 +413,75 @@ if st.session_state.results_df is not None:
         final_df = final_df[final_df['ErrorCategory'].isin(error_filters)]
         final_df = final_df.drop(columns=['ErrorCategory'])
 
-    if final_df.empty and view_mode == "Errors / Warnings Only" and st.session_state.all_results_raw:
-        st.success("No errors found based on current filters.")
-    elif final_df.empty and not st.session_state.all_results_raw:
+    if final_df.empty and view_mode == "Errors / Warnings Only" and raw_data:
+        st.success("🎉 Great job! No errors found based on current filters.")
+    elif final_df.empty and not raw_data:
         st.info("No results to display.")
     else:
-        if layout_mode == "Horizontal (Aggregated)":
-            def aggregate_rows(x):
-                lines = []
-                for _, row in x.iterrows():
-                    lines.append(f"{row['Details']} - {row['Reference']}")
-                return " || ".join(lines)
+        def color_status(val):
+            if val == "Valid":
+                return 'background-color: #21aeb3; color: white' 
+            elif val == "Partially matched":
+                return 'background-color: #000000; color: #21aeb3; font-weight: bold'
+            elif val == "Not found":
+                return 'background-color: #383838; color: #aaaaaa'
+            elif val == "Error":
+                return 'background-color: #2d2d2d; color: #888888'
+            return ''
 
-            final_df = final_df.groupby(['URL', 'File'])[['Details', 'Reference']].apply(aggregate_rows).reset_index(name='Aggregated Details')
-            st.dataframe(final_df, use_container_width=True, height=600)
+        display_df = pd.DataFrame()
+
+        if layout_mode == "Horizontal (Aggregated)":
+            refs = st.session_state.processed_refs
+            unique_targets = sorted(list(set(final_df['URL'])), key=lambda x: target_order_map.get(x, 9999))
             
-            csv = final_df.to_csv(index=False).encode('utf-8-sig')
+            rows = []
+            for url in unique_targets:
+                url_rows = final_df[final_df['URL'] == url]
+                
+                row_data = {
+                    "URL": url,
+                    "File": file_type
+                }
+                
+                has_visible_data = False
+                
+                for i, ref in enumerate(refs):
+                    idx = i + 1
+                    col_res = f"Result {idx}"
+                    col_det = f"Details {idx}"
+                    col_ref = f"Ref {idx}"
+                    
+                    match = url_rows[url_rows['Reference'] == ref['original']]
+                    
+                    if not match.empty:
+                        has_visible_data = True
+                        row_data[col_res] = match.iloc[0]['Result']
+                        row_data[col_det] = match.iloc[0]['Details']
+                        row_data[col_ref] = match.iloc[0]['Reference']
+                    else:
+                        row_data[col_res] = "Filtered"
+                        row_data[col_det] = "-"
+                        row_data[col_ref] = ref['original']
+                
+                if has_visible_data:
+                    rows.append(row_data)
+            
+            display_df = pd.DataFrame(rows)
+            
+            result_cols = [c for c in display_df.columns if c.startswith("Result")]
+            styled_df = display_df.style.map(color_status, subset=result_cols)
             
         else:
-            def color_status(val):
-                if val == "Valid":
-                    return 'background-color: #21aeb3; color: white' 
-                elif val == "Partially matched":
-                    return 'background-color: #000000; color: #21aeb3; font-weight: bold'
-                elif val == "Not found":
-                    return 'background-color: #383838; color: #aaaaaa'
-                elif val == "Error":
-                    return 'background-color: #2d2d2d; color: #888888'
-                return ''
+            display_df = final_df[["URL", "File", "Result", "Details", "Reference"]]
+            styled_df = display_df.style.map(color_status, subset=['Result'])
 
-            st.dataframe(
-                final_df.style.map(color_status, subset=['Result']),
-                use_container_width=True,
-                height=600
-            )
-            csv = final_df.to_csv(index=False).encode('utf-8-sig')
+        st.dataframe(
+            styled_df,
+            use_container_width=True,
+            height=600
+        )
+        csv = display_df.to_csv(index=False).encode('utf-8-sig')
 
         st.download_button(
             label=f"Download CSV ({view_mode})",
