@@ -1,4 +1,4 @@
-# Ads.txt / App-ads.txt Validator
+# Ads.txt / App-ads.txt line Checker
 
 A high-performance Streamlit application designed for AdOps professionals to validate `ads.txt` and `app-ads.txt` files across multiple domains simultaneously. 
 
